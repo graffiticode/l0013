@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "L0013",
+  "title": "L0013",
+  "description": "Output of an L0013 `snap` program — the uploaded thumbnail's URL plus its base64 PNG.",
+  "type": "object",
+  "properties": {
+    "image": {
+      "description": "Public URL of the uploaded thumbnail PNG (alias of `url`; the key the form view renders)",
+      "type": "string"
+    },
+    "url": {
+      "description": "Public URL of the uploaded thumbnail PNG",
+      "type": "string"
+    },
+    "png": {
+      "description": "Base64-encoded PNG of the thumbnail",
+      "type": "string"
+    },
+    "item": {
+      "description": "The id the upload path was derived from",
+      "type": "string"
+    }
+  }
+}

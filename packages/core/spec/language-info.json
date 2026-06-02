@@ -1,0 +1,24 @@
+{
+  "id": "0013",
+  "description": "Utility dialect that photographs an existing task: it renders that task's form view (given its `task` id and `lang`), crops to a fixed aspect, uploads the PNG to an item-derived Storage path, and returns the image URL. Used to generate thumbnails; not a content-authoring target.",
+  "supported_item_types": [
+    "thumbnail"
+  ],
+  "example_prompts": [
+    {
+      "prompt": "Capture a thumbnail of task abc123 in language 0166.",
+      "produces": "thumbnail",
+      "notes": "Minimal snap: snap { task: \"abc123\", lang: \"0166\" }.. — renders the task's form view and uploads the PNG."
+    },
+    {
+      "prompt": "Snapshot task abc123 (lang 0173) and store it under item demo1.",
+      "produces": "thumbnail",
+      "notes": "Sets `item` so the upload path is thumbnails/demo1.png instead of being derived from the task id."
+    },
+    {
+      "prompt": "Thumbnail task abc123 (lang 0166) at 240px wide.",
+      "produces": "thumbnail",
+      "notes": "Sets `width` to control the output size; height follows the crop aspect."
+    }
+  ]
+}
