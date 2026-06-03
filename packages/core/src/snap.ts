@@ -74,11 +74,12 @@ const SCAN_W = 512; // analyze a downscaled copy; positioning doesn't need full 
 
 // Decide the crop rectangle (in captured-pixel space) from a full-page screenshot. Analysis runs
 // on a downscaled greyscale copy with an integral image (O(1) per window):
-//   - `slice` aspect + `zoom` → the zoom-0 frame is the full content box at that aspect (all ink);
-//     zoom 1 is the densest *natural* region — the target-aspect window inside the frame that
-//     maximizes ink²/area (= ink × density), i.e. the tightest window still capturing a dense
-//     cluster (e.g. the square bounding a pie chart); `zoom` interpolates the window size between
-//     the two and re-finds the densest position *inside* the frame, so zooming stays on-content;
+//   - `slice` aspect + `zoom` → the zoom-0 frame is the smallest box at that aspect *containing*
+//     all the ink (e.g. `slice "1:1"` → a square enclosing every inked pixel); zoom 1 is the
+//     densest *natural* region — the target-aspect window inside the frame that maximizes ink²/area
+//     (= ink × density), i.e. the tightest window still capturing a dense cluster (e.g. the square
+//     bounding a pie chart); `zoom` interpolates the window size between the two and re-finds the
+//     densest position *inside* the frame, so zooming stays on-content (a bare `slice` = zoom 1);
 //   - `slice` aspect alone → the densest target-aspect rectangle, sized to fit the content and
 //     positioned by a 2-D search over both axes (works for wide "4:1" and tall "1:4" alike);
 //   - otherwise → the bounding box of inked content (trim whitespace), plus a small margin.
@@ -175,47 +176,48 @@ async function contentRect(
     return { ink: best, x: bx, y: by, ww, wh };
   };
 
-  // Window height that exactly fits the content box at the target aspect (the "all ink" size):
-  // pin whichever content dimension binds, derive the other from the aspect.
-  const whFull = bw / bh >= aspect ? bh : Math.round(bw / aspect);
+  // The zoom-0 frame = "all the ink": the smallest target-aspect rectangle that *contains* the
+  // whole content bounding box (so `slice "1:1"` is a square enclosing every inked pixel, not a
+  // square that fits inside it), centered on the content and clamped to the image. Every zoomed
+  // crop is a sub-window *inside* this frame, so zooming always stays on the same content.
+  let fw = bw, fh = bh;
+  if (fw < fh * aspect) fw = Math.round(fh * aspect); // content narrower than aspect → widen
+  else fh = Math.round(fw / aspect); //                  content wider/shorter → heighten
+  fw = Math.min(fw, W);
+  fh = Math.min(fh, H);
+  const cx = (minX + maxX + 1) / 2;
+  const cy = (minY + maxY + 1) / 2;
+  const fx = Math.max(0, Math.min(W - fw, Math.round(cx - fw / 2)));
+  const fy = Math.max(0, Math.min(H - fh, Math.round(cy - fh / 2)));
+  const base = { x: fx, y: fy, ww: fw, wh: fh };
 
-  // The zoom-0 frame: the full content-box-sized window placed at the densest position. Every
-  // zoomed crop is a sub-window *inside* this frame, so zooming in always stays on this content.
-  const base = maxInkWindow(Math.round(whFull * aspect), whFull);
+  // zoom 0 = the full frame (all ink); zoom 1 = the densest *natural* region: the target-aspect
+  // window inside the frame that maximizes ink²/area (= ink × density) — the tightest window still
+  // capturing a dense cluster (e.g. the square bounding a pie chart). zoom interpolates the window
+  // *size* between the two, then re-finds the densest position at that size. With no zoom, a
+  // `slice` defaults to the densest region (zoom 1), matching "densest by default".
+  const z = zoom == null ? 1 : Math.max(0, Math.min(1, Number(zoom)));
+  if (z <= 0) return mapRect(base.x, base.y, base.x + base.ww, base.y + base.wh);
 
-  if (zoom != null) {
-    // Zoom mode (geometric, content-derived — no fixed crop ratio). zoom 0 = the full frame
-    // (base); zoom 1 = the densest *natural* region: the target-aspect window inside the frame
-    // that maximizes ink²/area (= ink × density). That score climbs as a window fills with a
-    // dense cluster and falls once it starts adding whitespace, so it settles on the tightest
-    // window that still captures the cluster — e.g. the square bounding a pie chart. zoom
-    // interpolates the window *size* between the full frame and that region, then re-finds the
-    // densest position at that size.
-    const z = Math.max(0, Math.min(1, Number(zoom)));
-
-    // Search candidate window sizes (geometric steps) inside the frame for the best density score;
-    // the winning height is the zoom-1 size. Size — not position — is what zoom interpolates.
-    let bestScore = -1, denseWh = base.wh;
-    const minWh = Math.max(2, Math.round(base.wh * ZOOM_SEARCH_MIN));
-    for (let wh = base.wh; wh >= minWh; wh = Math.round(wh * ZOOM_SEARCH_STEP)) {
-      const r = maxInkWindow(
-        Math.round(wh * aspect), wh,
-        base.x, base.y, base.x + base.ww, base.y + base.wh,
-      );
-      const score = (r.ink * r.ink) / (r.ww * r.wh);
-      if (score > bestScore) { bestScore = score; denseWh = r.wh; }
-    }
-
-    const wh = Math.max(1, Math.round(base.wh - z * (base.wh - denseWh)));
+  // Find the zoom-1 size: scan candidate window sizes (geometric steps) inside the frame and keep
+  // the best density score. Size — not position — is what zoom interpolates.
+  let bestScore = -1, denseWh = base.wh;
+  const minWh = Math.max(2, Math.round(base.wh * ZOOM_SEARCH_MIN));
+  for (let wh = base.wh; wh >= minWh; wh = Math.round(wh * ZOOM_SEARCH_STEP)) {
     const r = maxInkWindow(
       Math.round(wh * aspect), wh,
       base.x, base.y, base.x + base.ww, base.y + base.wh,
     );
-    return mapRect(r.x, r.y, r.x + r.ww, r.y + r.wh);
+    const score = (r.ink * r.ink) / (r.ww * r.wh);
+    if (score > bestScore) { bestScore = score; denseWh = r.wh; }
   }
 
-  // Default slice (no zoom) = the zoom-0 frame.
-  return mapRect(base.x, base.y, base.x + base.ww, base.y + base.wh);
+  const wh = Math.max(1, Math.round(base.wh - z * (base.wh - denseWh)));
+  const r = maxInkWindow(
+    Math.round(wh * aspect), wh,
+    base.x, base.y, base.x + base.ww, base.y + base.wh,
+  );
+  return mapRect(r.x, r.y, r.x + r.ww, r.y + r.wh);
 }
 
 export interface SnapResult {
