@@ -66,7 +66,7 @@ export class Checker extends BaseChecker {
     });
   }
 
-  COVERAGE(node, options, resume) {
+  ZOOM(node, options, resume) {
     this.visit(node.elts[0], options, (e0) => {
       this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
     });
@@ -119,10 +119,10 @@ export class Transformer extends BaseTransformer {
     });
   }
 
-  COVERAGE(node, options, resume) {
+  ZOOM(node, options, resume) {
     this.visit(node.elts[0], options, (e0, v0) => {
       this.visit(node.elts[1], options, (e1, v1) => {
-        resume(concatErr(e0, e1), { ...toPlain(v1), coverage: v0 });
+        resume(concatErr(e0, e1), { ...toPlain(v1), zoom: v0 });
       });
     });
   }
@@ -170,7 +170,7 @@ export class Transformer extends BaseTransformer {
           task: args.task,
           viewport: args.viewport,
           slice: args.slice,
-          coverage: args.coverage,
+          zoom: args.zoom,
           crop: args.crop,
           width: args.width,
           height: args.height,

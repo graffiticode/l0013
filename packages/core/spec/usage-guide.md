@@ -19,7 +19,7 @@ Say this to get that:
 - **item** — the required modifier naming the item to capture: `item "item123" {}`.
 - **viewport** — "render in a 1280×800 window" → `viewport { width: 1280 height: 800 }`. Bounds the form's layout before capture (most form views fill the window).
 - **slice** — "a wide 4:1 banner of the busiest part" → `slice "4:1"`. Crops the densest region at that aspect (`"1:4"` for a tall slice), sized to the content.
-- **coverage** — how much ink the slice must include, paired with `slice`. "a 1:1 square holding all the content" → `slice "1:1" coverage 1`. Lower values (e.g. `coverage 0.8`) tighten toward the densest core.
+- **zoom** — how far to zoom in within a `slice`, from all the ink to the densest natural region. "a 1:1 square holding all the content" → `slice "1:1" zoom 0`; "a square centered on the pie" → `slice "1:1" zoom 1` (the tightest box still capturing the dense cluster, size derived from the ink). Mid values (e.g. `zoom 0.5`) interpolate between the two.
 - **crop** — "exactly the top 800×600" → `crop { x: 0 y: 0 width: 800 height: 600 }` (explicit override of the content-aware crop).
 - **width / height** — "at most 240px wide" → `width 240`; "no taller than 512" → `height 512`. Together they form a max bounding box (output fits inside, aspect preserved). Use `height` to keep a tall `slice "1:4"` from blowing up.
 - **Program terminator** — every L0013 program ends with `..`. Don't omit it.

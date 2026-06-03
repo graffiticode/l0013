@@ -21,6 +21,11 @@ const DEFAULT_OUTPUT_W = 1024; // crisp on retina; caller can override via `widt
 const SETTLE_MS = 1500; // let the form paint / post its first data-updated
 const INK_THRESHOLD = 12; // greyscale distance from the background to count a pixel as "ink"
 const INK_MARGIN = 8 * DEVICE_SCALE; // padding (capture px) around the trimmed content box
+// Lower bound on the zoom-1 size search, as a fraction of the zoom-0 frame's linear size — purely
+// to bound the search loop and avoid degenerate sub-pixel windows. It does NOT set the zoom-1
+// size: that's chosen by the density score (ink²/area), which disfavors tiny windows on its own.
+const ZOOM_SEARCH_MIN = 0.05;
+const ZOOM_SEARCH_STEP = 0.9; // geometric shrink between candidate sizes in the zoom-1 size search
 
 export interface SnapCrop {
   x?: number;
@@ -40,7 +45,7 @@ export interface SnapArgs {
   lang?: string;
   viewport?: SnapViewport; // browser window the form lays out into (default 1024×768)
   slice?: string; // "W:H" → crop the densest band at that aspect (e.g. "4:1" wide, "1:4" tall)
-  coverage?: number; // 0..1 fraction of ink the slice region must include (1 = all ink)
+  zoom?: number; // 0..1 zoom within a `slice`: 0 = frame all ink, 1 = densest region (max ink²/area)
   crop?: SnapCrop; // explicit clip rectangle (manual override of the content-aware crop)
   width?: number; // max output width (px); with `height`, defines a bounding box (fit inside)
   height?: number; // max output height (px)
@@ -69,8 +74,11 @@ const SCAN_W = 512; // analyze a downscaled copy; positioning doesn't need full 
 
 // Decide the crop rectangle (in captured-pixel space) from a full-page screenshot. Analysis runs
 // on a downscaled greyscale copy with an integral image (O(1) per window):
-//   - `slice` aspect + `coverage` → the smallest target-aspect window holding ≥ coverage of the
-//     total ink (coverage=1 contains all ink, e.g. a 1:1 square around the content);
+//   - `slice` aspect + `zoom` → the zoom-0 frame is the full content box at that aspect (all ink);
+//     zoom 1 is the densest *natural* region — the target-aspect window inside the frame that
+//     maximizes ink²/area (= ink × density), i.e. the tightest window still capturing a dense
+//     cluster (e.g. the square bounding a pie chart); `zoom` interpolates the window size between
+//     the two and re-finds the densest position *inside* the frame, so zooming stays on-content;
 //   - `slice` aspect alone → the densest target-aspect rectangle, sized to fit the content and
 //     positioned by a 2-D search over both axes (works for wide "4:1" and tall "1:4" alike);
 //   - otherwise → the bounding box of inked content (trim whitespace), plus a small margin.
@@ -79,7 +87,7 @@ async function contentRect(
   sharp: any,
   shot: Buffer,
   slice?: string,
-  coverage?: number,
+  zoom?: number,
 ): Promise<Rect> {
   const meta = await sharp(shot).metadata();
   const fullW: number = meta.width || SCAN_W;
@@ -148,13 +156,18 @@ async function contentRect(
   const bw = maxX - minX + 1;
   const bh = maxY - minY + 1;
 
-  // A 2-D sliding-window max-ink search at a fixed window size (integral image → O(1)/position).
-  const maxInkWindow = (wwIn: number, whIn: number) => {
-    const ww = Math.max(1, Math.min(W, wwIn));
-    const wh = Math.max(1, Math.min(H, whIn));
-    let best = -1, bx = 0, by = 0;
-    for (let y = 0; y <= H - wh; y++) {
-      for (let x = 0; x <= W - ww; x++) {
+  // A 2-D sliding-window max-ink search at a fixed window size, with the window constrained to lie
+  // within the region [rx0, ry0, rx1, ry1) (defaults to the whole image). Integral image →
+  // O(1)/position. Used both to place the full frame and to find the densest sub-window inside it.
+  const maxInkWindow = (
+    wwIn: number, whIn: number,
+    rx0 = 0, ry0 = 0, rx1 = W, ry1 = H,
+  ) => {
+    const ww = Math.max(1, Math.min(rx1 - rx0, wwIn));
+    const wh = Math.max(1, Math.min(ry1 - ry0, whIn));
+    let best = -1, bx = rx0, by = ry0;
+    for (let y = ry0; y <= ry1 - wh; y++) {
+      for (let x = rx0; x <= rx1 - ww; x++) {
         const s = sumRect(x, y, x + ww, y + wh);
         if (s > best) { best = s; bx = x; by = y; }
       }
@@ -162,33 +175,47 @@ async function contentRect(
     return { ink: best, x: bx, y: by, ww, wh };
   };
 
-  if (coverage != null) {
-    // Coverage mode: the smallest target-aspect window holding ≥ `coverage` of the total ink,
-    // positioned to do so. coverage=1 → contains all ink (e.g. a 1:1 square around the content);
-    // lower values tighten toward the densest core. Window height parametrizes the size (width =
-    // height × aspect); max ink is monotonic in size, so binary-search the smallest size.
-    const total = sumRect(0, 0, W, H);
-    const c = Math.max(0, Math.min(1, Number(coverage)));
-    const target = c * total;
-    const whMax = Math.max(1, Math.ceil(Math.max(bh, bw / aspect)));
-    let lo = 1, hi = whMax, ansWh = whMax;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const { ink } = maxInkWindow(Math.round(mid * aspect), mid);
-      if (ink >= target) { ansWh = mid; hi = mid - 1; } else { lo = mid + 1; }
+  // Window height that exactly fits the content box at the target aspect (the "all ink" size):
+  // pin whichever content dimension binds, derive the other from the aspect.
+  const whFull = bw / bh >= aspect ? bh : Math.round(bw / aspect);
+
+  // The zoom-0 frame: the full content-box-sized window placed at the densest position. Every
+  // zoomed crop is a sub-window *inside* this frame, so zooming in always stays on this content.
+  const base = maxInkWindow(Math.round(whFull * aspect), whFull);
+
+  if (zoom != null) {
+    // Zoom mode (geometric, content-derived — no fixed crop ratio). zoom 0 = the full frame
+    // (base); zoom 1 = the densest *natural* region: the target-aspect window inside the frame
+    // that maximizes ink²/area (= ink × density). That score climbs as a window fills with a
+    // dense cluster and falls once it starts adding whitespace, so it settles on the tightest
+    // window that still captures the cluster — e.g. the square bounding a pie chart. zoom
+    // interpolates the window *size* between the full frame and that region, then re-finds the
+    // densest position at that size.
+    const z = Math.max(0, Math.min(1, Number(zoom)));
+
+    // Search candidate window sizes (geometric steps) inside the frame for the best density score;
+    // the winning height is the zoom-1 size. Size — not position — is what zoom interpolates.
+    let bestScore = -1, denseWh = base.wh;
+    const minWh = Math.max(2, Math.round(base.wh * ZOOM_SEARCH_MIN));
+    for (let wh = base.wh; wh >= minWh; wh = Math.round(wh * ZOOM_SEARCH_STEP)) {
+      const r = maxInkWindow(
+        Math.round(wh * aspect), wh,
+        base.x, base.y, base.x + base.ww, base.y + base.wh,
+      );
+      const score = (r.ink * r.ink) / (r.ww * r.wh);
+      if (score > bestScore) { bestScore = score; denseWh = r.wh; }
     }
-    const r = maxInkWindow(Math.round(ansWh * aspect), ansWh);
+
+    const wh = Math.max(1, Math.round(base.wh - z * (base.wh - denseWh)));
+    const r = maxInkWindow(
+      Math.round(wh * aspect), wh,
+      base.x, base.y, base.x + base.ww, base.y + base.wh,
+    );
     return mapRect(r.x, r.y, r.x + r.ww, r.y + r.wh);
   }
 
-  // Default slice (no coverage): size the window to fit the content box (pin the binding
-  // dimension) and 2-D-search for the densest position.
-  const sized =
-    bw / bh >= aspect
-      ? { ww: Math.round(bh * aspect), wh: bh }
-      : { ww: bw, wh: Math.round(bw / aspect) };
-  const r = maxInkWindow(sized.ww, sized.wh);
-  return mapRect(r.x, r.y, r.x + r.ww, r.y + r.wh);
+  // Default slice (no zoom) = the zoom-0 frame.
+  return mapRect(base.x, base.y, base.x + base.ww, base.y + base.wh);
 }
 
 export interface SnapResult {
@@ -288,7 +315,7 @@ async function upload(itemId: string, buffer: Buffer): Promise<string> {
 }
 
 export async function snap(args: SnapArgs): Promise<SnapResult> {
-  const { item, task, lang, viewport, slice, coverage, crop, width, height, token } = args;
+  const { item, task, lang, viewport, slice, zoom, crop, width, height, token } = args;
   if (!item) throw new Error("snap: `item` is required");
   const itemId = item;
   // The owner's access token: from the compile request (config.authToken), or a local-dev
@@ -344,7 +371,7 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
       // Content-aware: capture the whole form, then trim to the inked content (default) or take
       // the densest fixed-aspect region (`slice`). The resize fits the crop into the output box.
       const shot = (await page.screenshot({ type: "png", fullPage: true })) as Buffer;
-      const rect = await contentRect(sharp, shot, slice, coverage);
+      const rect = await contentRect(sharp, shot, slice, zoom);
       png = await sharp(shot).extract(rect).resize(resizeOpts).png().toBuffer();
     }
 
