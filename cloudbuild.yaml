@@ -29,6 +29,12 @@ steps:
       - '--quiet'
       - '--set-env-vars=AUTH_URL=$_AUTH_URL'
       - '--allow-unauthenticated'
+      # Headless Chrome (the `snap` render) needs more memory/CPU than a plain lang server, and
+      # each request launches its own browser — so keep concurrency low to avoid OOM.
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--concurrency=4'
+      - '--timeout=300'
     id: Deploy
     entrypoint: gcloud
 

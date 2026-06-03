@@ -10,22 +10,17 @@ content-authoring target.
 
 | Function | Signature | Description |
 | :------- | :-------- | :---------- |
-| `snap` | `<record: record>` | Render `task`'s form view (in `lang`), crop, upload PNG, return `{ image, url, png, item }` |
+| `snap` | `<opts: record>` | Render the item's form view, crop, upload PNG, return `{ image, url, png, item }` |
+| `item` | `<string opts: opts>` | Set the item id to capture (task + language resolved from it) |
+| `viewport` | `<record opts: opts>` | Set the browser window `{ width, height }` the form lays out into |
+| `crop` | `<record opts: opts>` | Set the crop `{ x, y, width, height }` (CSS pixels) |
+| `width` | `<number opts: opts>` | Set the output width in pixels |
 
-## Record fields
-
-- `task` (required) — task id to render.
-- `lang` (required) — language id of `task`.
-- `item` (optional) — upload path key (`thumbnails/{item}.png`); defaults to `task`.
-- `crop` (optional) — `{ x, y, width, height }` clip in CSS pixels; defaults to a fixed top crop.
-- `width` (optional) — output width in pixels.
+Options are assembled by chaining the arity-2 modifiers onto a base record `{}`. `item` is
+required; `viewport`, `crop`, and `width` are optional.
 
 ## L0013 Example
 
 ```
-snap {
-  item: "demo1",
-  task: "abc123",
-  lang: "0166"
-}..
+snap item "item123" {}..
 ```

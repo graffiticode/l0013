@@ -1,24 +1,24 @@
 {
   "id": "0013",
-  "description": "Utility dialect that photographs an existing task: it renders that task's form view (given its `task` id and `lang`), crops to a fixed aspect, uploads the PNG to an item-derived Storage path, and returns the image URL. Used to generate thumbnails; not a content-authoring target.",
+  "description": "Utility dialect that photographs an existing item: given its item id, it renders that item's form view (resolving the task id and language from the item id), crops to a fixed aspect, uploads the PNG to an item-derived Storage path, and returns the image URL. Used to generate thumbnails; not a content-authoring target.",
   "supported_item_types": [
     "thumbnail"
   ],
   "example_prompts": [
     {
-      "prompt": "Capture a thumbnail of task abc123 in language 0166.",
+      "prompt": "Capture a thumbnail of item item123.",
       "produces": "thumbnail",
-      "notes": "Minimal snap: snap { task: \"abc123\", lang: \"0166\" }.. — renders the task's form view and uploads the PNG."
+      "notes": "Simplest snap: snap item \"item123\" {}.. — renders the item's form view and uploads the PNG."
     },
     {
-      "prompt": "Snapshot task abc123 (lang 0173) and store it under item demo1.",
+      "prompt": "Thumbnail item item123 at 240px wide.",
       "produces": "thumbnail",
-      "notes": "Sets `item` so the upload path is thumbnails/demo1.png instead of being derived from the task id."
+      "notes": "Adds the `width` modifier: snap width 240 item \"item123\" {}.. — height follows the crop aspect."
     },
     {
-      "prompt": "Thumbnail task abc123 (lang 0166) at 240px wide.",
+      "prompt": "Snapshot item item123, just the top 800×600.",
       "produces": "thumbnail",
-      "notes": "Sets `width` to control the output size; height follows the crop aspect."
+      "notes": "Adds the `crop` modifier: snap crop { x: 0 y: 0 width: 800 height: 600 } item \"item123\" {}.."
     }
   ]
 }

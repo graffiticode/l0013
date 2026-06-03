@@ -12,30 +12,36 @@ The core language specification — syntax, semantics, and base library — can 
 
 | Function | Signature | Description |
 | :------- | :-------- | :---------- |
-| `snap` | `<record: record>` | Renders a task's form view, crops it, uploads a PNG, returns the image URL |
+| `snap` | `<opts: record>` | Renders an item's form view, crops it, uploads a PNG, returns the image URL |
+| `item` | `<string opts: opts>` | Sets the item id to capture (task + language are resolved from it) |
+| `viewport` | `<record opts: opts>` | Sets the browser window `{ width, height }` the form lays out into |
+| `crop` | `<record opts: opts>` | Sets the crop `{ x, y, width, height }` (CSS pixels) |
+| `width` | `<number opts: opts>` | Sets the output width in pixels |
 
 ### snap
 
-`snap` takes a record describing what to capture and returns a record
-`{ image, url, png, item }`: a public CDN URL for the uploaded PNG (`url`/`image`),
-the base64-encoded PNG (`png`), and the id the URL was derived from (`item`).
+`snap` takes an options record — assembled by chaining the modifier functions onto a base
+record `{}` — and returns `{ image, url, png, item }`: a public CDN URL for the uploaded PNG
+(`url`/`image`), the base64-encoded PNG (`png`), and the item id the upload path was derived
+from (`item`). The task id and language are resolved from the item id.
 
-Record fields:
+Modifiers (each arity 2 — a value plus the rest of the options):
 
-- `task` (required) — the task id whose form view is rendered.
-- `lang` (required) — the language id of that task (e.g. `"0166"`).
-- `item` (optional) — id used to derive the upload path `thumbnails/{item}.png`; defaults to `task`.
-- `crop` (optional) — `{ x, y, width, height }` clip in CSS pixels; defaults to a fixed top crop.
-- `width` (optional) — output width in pixels; height follows the crop aspect.
+- `item "<id>"` (required) — the item to capture; its form view is rendered.
+- `viewport { width: height: }` (optional) — the browser window the form lays out into; defaults to 1024×768. Most form views fill the window, so this bounds the layout before capture.
+- `crop { x: y: width: height: }` (optional) — clip in CSS pixels; defaults to the top 4:3 of the viewport.
+- `width <n>` (optional) — output width in pixels; height follows the crop aspect.
 
 ## Program Examples
 
-Capture the form view of a spreadsheet task into a thumbnail:
+Capture an item's form view into a thumbnail (simplest form):
 
 ```
-snap {
-  item: "demo1",
-  task: "abc123",
-  lang: "0166"
-}..
+snap item "item123" {}..
+```
+
+With a crop and output width:
+
+```
+snap width 240 crop { x: 0 y: 0 width: 800 height: 600 } item "item123" {}..
 ```
