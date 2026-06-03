@@ -22,8 +22,9 @@ content-authoring target.
 Options are assembled by chaining the arity-2 modifiers onto a base record `{}`. `item` is
 required; `viewport`, `slice`, `zoom`, `crop`, `width`, and `height` are optional. `width`/`height` form
 a max bounding box (the output fits inside, preserving aspect). The crop is content-aware:
-by default `snap` trims whitespace to the inked content; `slice` crops the densest fixed-aspect
-band; an explicit `crop` overrides both.
+by default `snap` trims whitespace to the inked content; `slice` crops a fixed-aspect box (framing
+all the ink by default, i.e. `zoom 0`; `zoom 1` tightens onto the densest region); an explicit
+`crop` overrides both.
 
 ## L0013 Examples
 

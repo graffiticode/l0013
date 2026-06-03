@@ -79,7 +79,7 @@ const SCAN_W = 512; // analyze a downscaled copy; positioning doesn't need full 
 //     densest *natural* region — the target-aspect window inside the frame that maximizes ink²/area
 //     (= ink × density), i.e. the tightest window still capturing a dense cluster (e.g. the square
 //     bounding a pie chart); `zoom` interpolates the window size between the two and re-finds the
-//     densest position *inside* the frame, so zooming stays on-content (a bare `slice` = zoom 1);
+//     densest position *inside* the frame, so zooming stays on-content (a bare `slice` = zoom 0);
 //   - `slice` aspect alone → the densest target-aspect rectangle, sized to fit the content and
 //     positioned by a 2-D search over both axes (works for wide "4:1" and tall "1:4" alike);
 //   - otherwise → the bounding box of inked content (trim whitespace), plus a small margin.
@@ -195,8 +195,8 @@ async function contentRect(
   // window inside the frame that maximizes ink²/area (= ink × density) — the tightest window still
   // capturing a dense cluster (e.g. the square bounding a pie chart). zoom interpolates the window
   // *size* between the two, then re-finds the densest position at that size. With no zoom, a
-  // `slice` defaults to the densest region (zoom 1), matching "densest by default".
-  const z = zoom == null ? 1 : Math.max(0, Math.min(1, Number(zoom)));
+  // `slice` defaults to framing all the ink (zoom 0) — the least surprising default.
+  const z = zoom == null ? 0 : Math.max(0, Math.min(1, Number(zoom)));
   if (z <= 0) return mapRect(base.x, base.y, base.x + base.ww, base.y + base.wh);
 
   // Find the zoom-1 size: scan candidate window sizes (geometric steps) inside the frame and keep

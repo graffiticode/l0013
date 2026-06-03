@@ -29,8 +29,8 @@ record `{}` — and returns `{ image, url, item }`: a public CDN URL for the upl
 language are resolved from the item id.
 
 The crop is **content-aware**. By default `snap` trims the surrounding whitespace down to the
-inked content. `slice "W:H"` instead crops a fixed-aspect region — by default the *densest* one
-(sized to the content, positioned by a 2-D search). `zoom <0–1>` scales that region between
+inked content. `slice "W:H"` instead crops a fixed-aspect region — by default the smallest box at
+that aspect that **contains** all the ink (= `zoom 0`). `zoom <0–1>` scales that region between
 framing **all** the ink (`zoom 0` — the full content box, e.g. a 1:1 square enclosing the content)
 and the **densest natural region** (`zoom 1` — the tightest box that still captures a dense
 cluster, e.g. `slice "1:1" zoom 1` on a pie chart → a square centered on the pie). The zoom-1 size
@@ -41,7 +41,7 @@ Modifiers (each arity 2 — a value plus the rest of the options):
 
 - `item "<id>"` (required) — the item to capture; its form view is rendered.
 - `viewport { width: height: }` (optional) — the browser window the form lays out into; defaults to 1024×768. Most form views fill the window, so this bounds the layout before capture.
-- `slice "<W:H>"` (optional) — crop a region at this aspect ratio (`"4:1"` = wide, `"1:4"` = tall); densest by default.
+- `slice "<W:H>"` (optional) — crop a region at this aspect ratio (`"4:1"` = wide, `"1:4"` = tall); frames all the ink by default (= `zoom 0`), `zoom` tightens onto the densest region.
 - `zoom <0–1>` (optional, with `slice`) — zoom from framing all the ink to the densest natural region; `0` = all ink (e.g. `slice "1:1" zoom 0` → a square holding all the content), `1` = the tightest box still capturing a dense cluster (e.g. `slice "1:1" zoom 1` on a pie chart → a square centered on the pie). The zoom-1 size comes from the ink, not a fixed ratio.
 - `crop { x: y: width: height: }` (optional) — explicit clip in CSS pixels; overrides the content-aware crop.
 - `width <n>` / `height <n>` (optional) — max output width / height in pixels. Together they form a bounding box: the image is scaled to the largest size that fits while preserving the crop's aspect. With only `width`, height follows the aspect (and vice-versa); with neither, the default width is used. Use `height` to bound tall `slice` ratios (e.g. `slice "1:4" height 512`).
