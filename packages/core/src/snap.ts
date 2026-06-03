@@ -2,8 +2,10 @@
 // The side-effecting core of L0013: render a task's form view in headless Chrome, crop it
 // (content-aware — trim to the inked content by default, or take the densest fixed-aspect band
 // with `slice "W:H"`), upload the PNG to an item-derived Firebase Storage path, and return its
-// public URL. Heavy, node-only deps (puppeteer / sharp / firebase-admin) are imported
-// lazily here so that merely importing the compiler (e.g. build-static) does not pull them in.
+// public URL with a content-hash cache-buster. Heavy, node-only deps (puppeteer / sharp /
+// firebase-admin) are imported lazily here so that merely importing the compiler (e.g.
+// build-static) does not pull them in.
+import { createHash } from "node:crypto";
 
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
 // The app's item form route (`/form/{itemId}`) resolves an item id to its task + language and
@@ -380,7 +382,12 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     }
 
     const publicUrl = await upload(itemId, png);
-    return { url: publicUrl, item: itemId };
+    // The object path is stable (`thumbnails/{item}.png` is overwritten each snap), so a fixed URL
+    // would be served stale from browser/CDN/`<img>` caches even though the bytes changed. Append a
+    // content-hash query param: the URL changes iff the image changes — busting caches on update,
+    // staying cacheable when unchanged.
+    const version = createHash("sha1").update(png).digest("hex").slice(0, 16);
+    return { url: `${publicUrl}?v=${version}`, item: itemId };
   } finally {
     await browser.close();
   }
