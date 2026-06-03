@@ -5,8 +5,36 @@
 // Injected into the shared View (from @graffiticode/l0000-view), which supplies `state.data` and
 // `state.errors`.
 import "../../index.css";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import type { FormProps, CompileError } from "@graffiticode/l0000-view";
+
+// Printer-style crop marks: a short horizontal + vertical tick at each corner, offset just outside
+// the image edges, framing the actual (content-aware-cropped) thumbnail. Rendered inside a wrapper
+// that's sized to the loaded image, so the ticks hug its real bounds.
+function CropMarks() {
+  const len = 12; // tick length (px)
+  const gap = 4; //  gap between the image edge and the tick (px)
+  const th = 1; //   tick thickness (px)
+  const tick = (style: CSSProperties, i: number) => (
+    <span key={i} className="pointer-events-none absolute bg-zinc-400" style={style} />
+  );
+  const h = { width: len, height: th }; // horizontal tick
+  const v = { width: th, height: len }; // vertical tick
+  return (
+    <>
+      {[
+        { top: 0, left: -(gap + len), ...h }, // top-left, along top edge
+        { left: 0, top: -(gap + len), ...v }, // top-left, along left edge
+        { top: 0, right: -(gap + len), ...h }, // top-right, along top edge
+        { right: 0, top: -(gap + len), ...v }, // top-right, along right edge
+        { bottom: 0, left: -(gap + len), ...h }, // bottom-left, along bottom edge
+        { left: 0, bottom: -(gap + len), ...v }, // bottom-left, along left edge
+        { bottom: 0, right: -(gap + len), ...h }, // bottom-right, along bottom edge
+        { right: 0, bottom: -(gap + len), ...v }, // bottom-right, along right edge
+      ].map(tick)}
+    </>
+  );
+}
 
 type Status = "loading" | "loaded" | "error";
 
@@ -110,15 +138,18 @@ export const Form = ({ state }: FormProps) => {
     <div className="overflow-hidden rounded-md bg-white text-zinc-900">
       <StatusBanner status={status} elapsed={elapsed} url={src} />
       {src && (
-        <div className="flex justify-center p-4">
-          <img
-            key={src}
-            src={src}
-            alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"}
-            onLoad={() => setStatus("loaded")}
-            onError={() => setStatus("error")}
-            style={{ display: status === "loaded" ? "block" : "none" }}
-          />
+        <div className="flex justify-center p-6">
+          <div className="relative inline-block">
+            <img
+              key={src}
+              src={src}
+              alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"}
+              onLoad={() => setStatus("loaded")}
+              onError={() => setStatus("error")}
+              style={{ display: status === "loaded" ? "block" : "none" }}
+            />
+            {status === "loaded" && <CropMarks />}
+          </div>
         </div>
       )}
     </div>
