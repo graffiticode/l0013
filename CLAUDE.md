@@ -23,8 +23,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Vitest is installed at the root (`vitest ^2.1.3`) but **no test script is wired up and no `*.spec.*` / `*.test.*` files exist**. There is no test config. If adding tests, wire up a `test` script and a vitest config first.
 
 ### Deployment
-- **GCP Cloud Build**: `npm run gcp:build` (submits `cloudbuild.yaml`)
-- **GCP Direct Deploy**: `npm run gcp:deploy` (Cloud Run `l0013`, region `us-central1`, port 50013, **2Gi memory / 2 CPU / concurrency 4 / 300s timeout** — sized for headless Chrome)
+- **Deploy**: `npm run gcp:build` — this is the canonical way to deploy (submits `cloudbuild.yaml` to Cloud Build, which builds and deploys to Cloud Run).
+- **GCP Direct Deploy**: `npm run gcp:deploy` (a from-source Cloud Run deploy of `l0013`, region `us-central1`, port 50013, **2Gi memory / 2 CPU / concurrency 4 / 300s timeout** — sized for headless Chrome). Use `gcp:build` instead for normal deploys.
 - **View logs**: `npm run gcp:logs`
 - Also: `cloudbuild.staging.yaml`, `cloudbuild.production.yaml`, `Dockerfile`. See `DEPLOYMENT.md` and `GITHUB_DEPLOYMENT.md`.
 
