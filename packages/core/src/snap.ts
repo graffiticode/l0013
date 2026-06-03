@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // The side-effecting core of L0013: render a task's form view in headless Chrome, crop it
 // (content-aware — trim to the inked content by default, or take the densest fixed-aspect band
-// with `slice "W:H"`), upload the PNG to an item-derived Firebase Storage path, and return the
-// public URL + base64. Heavy, node-only deps (puppeteer / sharp / firebase-admin) are imported
+// with `slice "W:H"`), upload the PNG to an item-derived Firebase Storage path, and return its
+// public URL. Heavy, node-only deps (puppeteer / sharp / firebase-admin) are imported
 // lazily here so that merely importing the compiler (e.g. build-static) does not pull them in.
 
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
@@ -221,8 +221,7 @@ async function contentRect(
 }
 
 export interface SnapResult {
-  image: string; // alias of `url` — the key the L0013 form view renders
-  url: string; // public CDN URL of the uploaded PNG
+  url: string; // public CDN URL of the uploaded PNG — the key the L0013 form view renders
   item: string; // the id the URL was derived from
 }
 
@@ -342,7 +341,10 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     const page = await browser.newPage();
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    // Don't time out the page load — some forms take a while to settle, and a slow scrape should
+    // wait, not fail. `timeout: 0` disables Puppeteer's nav timeout; Cloud Run's request timeout
+    // (300s) is the real backstop, so this can't hang a worker indefinitely.
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 0 });
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
@@ -378,7 +380,7 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     }
 
     const publicUrl = await upload(itemId, png);
-    return { image: publicUrl, url: publicUrl, item: itemId };
+    return { url: publicUrl, item: itemId };
   } finally {
     await browser.close();
   }

@@ -24,8 +24,8 @@ The core language specification — syntax, semantics, and base library — can 
 ### snap
 
 `snap` takes an options record — assembled by chaining the modifier functions onto a base
-record `{}` — and returns `{ image, url, item }`: a public CDN URL for the uploaded PNG
-(`url`/`image`) and the item id the upload path was derived from (`item`). The task id and
+record `{}` — and returns `{ url, item }`: a public CDN URL for the uploaded PNG
+(`url`) and the item id the upload path was derived from (`item`). The task id and
 language are resolved from the item id.
 
 The crop is **content-aware**. By default `snap` trims the surrounding whitespace down to the

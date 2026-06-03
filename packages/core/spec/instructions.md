@@ -10,7 +10,7 @@ content-authoring target.
 
 | Function | Signature | Description |
 | :------- | :-------- | :---------- |
-| `snap` | `<opts: record>` | Render the item's form view, crop, upload PNG, return `{ image, url, item }` |
+| `snap` | `<opts: record>` | Render the item's form view, crop, upload PNG, return `{ url, item }` |
 | `item` | `<string opts: opts>` | Set the item id to capture (task + language resolved from it) |
 | `viewport` | `<record opts: opts>` | Set the browser window `{ width, height }` the form lays out into |
 | `slice` | `<string opts: opts>` | Crop the densest region at a `"W:H"` aspect (`"4:1"` wide, `"1:4"` tall) |

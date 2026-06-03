@@ -36,7 +36,7 @@ export const View = ({ Form }: { Form: FormComponent }) => {
           setErrors([{ message: env.error?.message || `Failed to load ${id}.` } as CompileError]);
           return;
         }
-        // env.data is the compiled snap output { image, url, item } (or a nested { data, errors }).
+        // env.data is the compiled snap output { url, item } (or a nested { data, errors }).
         const out =
           env.data && typeof env.data === "object" && Array.isArray(env.data.errors)
             ? { data: env.data.data, errors: env.data.errors as CompileError[] }

@@ -5,7 +5,7 @@
 // arity-2 modifier functions (`item`, `crop`, `width`) onto a base record `{}`. Each modifier
 // returns a PLAIN object with one field set; `snap` (arity 1) consumes the assembled options,
 // resolves the task + language from the item id, renders that item's form view, crops it,
-// uploads a PNG, and returns { image, url, png, item }.
+// uploads a PNG, and returns { url, item }.
 //
 // Why plain objects: a record literal evaluates (in L0000's Transformer) to a Record wrapper
 // ({ _type, _entries: Map } with prefix-encoded keys), not a plain object — so we normalize it

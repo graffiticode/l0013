@@ -63,7 +63,7 @@ L0013 inherits the full L0000 base vocabulary (arithmetic, lists, lambdas, `map`
 
 | Function   | Arity | Description |
 |------------|:-----:|-------------|
-| `snap`     | 1 | Photograph an item's form view → `{ image, url, item }` |
+| `snap`     | 1 | Photograph an item's form view → `{ url, item }` |
 | `item`     | 2 | The item id to capture (task + language are resolved from it) |
 | `viewport` | 2 | Browser window the form lays out into (default 1024×768) |
 | `slice`    | 2 | `"W:H"` → crop the densest band at that aspect (e.g. `"4:1"` wide, `"1:4"` tall) |
