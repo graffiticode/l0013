@@ -15,32 +15,50 @@ The core language specification — syntax, semantics, and base library — can 
 | `snap` | `<opts: record>` | Renders an item's form view, crops it, uploads a PNG, returns the image URL |
 | `item` | `<string opts: opts>` | Sets the item id to capture (task + language are resolved from it) |
 | `viewport` | `<record opts: opts>` | Sets the browser window `{ width, height }` the form lays out into |
-| `crop` | `<record opts: opts>` | Sets the crop `{ x, y, width, height }` (CSS pixels) |
-| `width` | `<number opts: opts>` | Sets the output width in pixels |
+| `slice` | `<string opts: opts>` | Crops the densest region at a `"W:H"` aspect (e.g. `"4:1"` wide, `"1:4"` tall) |
+| `coverage` | `<number opts: opts>` | Fraction (0–1) of total ink the slice must include — `1` = all ink, lower = denser/tighter |
+| `crop` | `<record opts: opts>` | Explicit clip `{ x, y, width, height }` (CSS pixels) — manual override |
+| `width` | `<number opts: opts>` | Max output width in pixels |
+| `height` | `<number opts: opts>` | Max output height in pixels |
 
 ### snap
 
 `snap` takes an options record — assembled by chaining the modifier functions onto a base
-record `{}` — and returns `{ image, url, png, item }`: a public CDN URL for the uploaded PNG
-(`url`/`image`), the base64-encoded PNG (`png`), and the item id the upload path was derived
-from (`item`). The task id and language are resolved from the item id.
+record `{}` — and returns `{ image, url, item }`: a public CDN URL for the uploaded PNG
+(`url`/`image`) and the item id the upload path was derived from (`item`). The task id and
+language are resolved from the item id.
+
+The crop is **content-aware**. By default `snap` trims the surrounding whitespace down to the
+inked content. `slice "W:H"` instead crops a fixed-aspect region — by default the *densest* one
+(sized to the content, positioned by a 2-D search). `coverage <0–1>` controls how much ink the
+region must include: `coverage 1` is the smallest `W:H` box holding **all** the ink (e.g. a 1:1
+square enclosing the content), and lower values tighten toward the densest core. An explicit
+`crop` rectangle overrides both.
 
 Modifiers (each arity 2 — a value plus the rest of the options):
 
 - `item "<id>"` (required) — the item to capture; its form view is rendered.
 - `viewport { width: height: }` (optional) — the browser window the form lays out into; defaults to 1024×768. Most form views fill the window, so this bounds the layout before capture.
-- `crop { x: y: width: height: }` (optional) — clip in CSS pixels; defaults to the top 4:3 of the viewport.
-- `width <n>` (optional) — output width in pixels; height follows the crop aspect.
+- `slice "<W:H>"` (optional) — crop a region at this aspect ratio (`"4:1"` = wide, `"1:4"` = tall); densest by default.
+- `coverage <0–1>` (optional, with `slice`) — fraction of ink the region must include; `1` = all ink (e.g. `slice "1:1" coverage 1` → a square holding all the content), lower = denser/tighter.
+- `crop { x: y: width: height: }` (optional) — explicit clip in CSS pixels; overrides the content-aware crop.
+- `width <n>` / `height <n>` (optional) — max output width / height in pixels. Together they form a bounding box: the image is scaled to the largest size that fits while preserving the crop's aspect. With only `width`, height follows the aspect (and vice-versa); with neither, the default width is used. Use `height` to bound tall `slice` ratios (e.g. `slice "1:4" height 512`).
 
 ## Program Examples
 
-Capture an item's form view into a thumbnail (simplest form):
+Capture an item's form view, trimmed to its content (simplest form):
 
 ```
 snap item "item123" {}..
 ```
 
-With a crop and output width:
+A wide 4:1 banner over the busiest part of the form:
+
+```
+snap slice "4:1" item "item123" {}..
+```
+
+With an explicit crop and output width:
 
 ```
 snap width 240 crop { x: 0 y: 0 width: 800 height: 600 } item "item123" {}..

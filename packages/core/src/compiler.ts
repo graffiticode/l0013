@@ -60,6 +60,18 @@ export class Checker extends BaseChecker {
     });
   }
 
+  SLICE(node, options, resume) {
+    this.visit(node.elts[0], options, (e0) => {
+      this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
+    });
+  }
+
+  COVERAGE(node, options, resume) {
+    this.visit(node.elts[0], options, (e0) => {
+      this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
+    });
+  }
+
   CROP(node, options, resume) {
     this.visit(node.elts[0], options, (e0) => {
       this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
@@ -67,6 +79,12 @@ export class Checker extends BaseChecker {
   }
 
   WIDTH(node, options, resume) {
+    this.visit(node.elts[0], options, (e0) => {
+      this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
+    });
+  }
+
+  HEIGHT(node, options, resume) {
     this.visit(node.elts[0], options, (e0) => {
       this.visit(node.elts[1], options, (e1) => resume(concatErr(e0, e1), node));
     });
@@ -93,6 +111,22 @@ export class Transformer extends BaseTransformer {
     });
   }
 
+  SLICE(node, options, resume) {
+    this.visit(node.elts[0], options, (e0, v0) => {
+      this.visit(node.elts[1], options, (e1, v1) => {
+        resume(concatErr(e0, e1), { ...toPlain(v1), slice: v0 });
+      });
+    });
+  }
+
+  COVERAGE(node, options, resume) {
+    this.visit(node.elts[0], options, (e0, v0) => {
+      this.visit(node.elts[1], options, (e1, v1) => {
+        resume(concatErr(e0, e1), { ...toPlain(v1), coverage: v0 });
+      });
+    });
+  }
+
   CROP(node, options, resume) {
     this.visit(node.elts[0], options, (e0, v0) => {
       this.visit(node.elts[1], options, (e1, v1) => {
@@ -105,6 +139,14 @@ export class Transformer extends BaseTransformer {
     this.visit(node.elts[0], options, (e0, v0) => {
       this.visit(node.elts[1], options, (e1, v1) => {
         resume(concatErr(e0, e1), { ...toPlain(v1), width: v0 });
+      });
+    });
+  }
+
+  HEIGHT(node, options, resume) {
+    this.visit(node.elts[0], options, (e0, v0) => {
+      this.visit(node.elts[1], options, (e1, v1) => {
+        resume(concatErr(e0, e1), { ...toPlain(v1), height: v0 });
       });
     });
   }
@@ -127,8 +169,11 @@ export class Transformer extends BaseTransformer {
           lang: args.lang,
           task: args.task,
           viewport: args.viewport,
+          slice: args.slice,
+          coverage: args.coverage,
           crop: args.crop,
           width: args.width,
+          height: args.height,
           token,
         });
         resume(err, out);

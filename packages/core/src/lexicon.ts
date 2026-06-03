@@ -7,18 +7,23 @@
 //
 //   snap item "item123" {}..                         → { item: "item123" }
 //   snap width 240 item "item123" {}..               → { item: "item123", width: 240 }
+//   snap slice "4:1" item "item123" {}..             → { item: "item123", slice: "4:1" }
 //   snap crop { x: 0 y: 0 width: 800 height: 600 } item "item123" {}..
 //
 // `snap` resolves the task id and language from the item id, renders that item's form view,
-// crops it, uploads a PNG, and returns { image, url, png, item }.
+// crops it (default: trim to inked content; `slice "W:H"`: densest band at that aspect),
+// uploads a PNG, and returns { image, url, item }.
 import { lexicon as base } from "@graffiticode/l0000";
 
 const additions = {
   snap: { tk: 1, name: "SNAP", cls: "function", length: 1, arity: 1 },
   item: { tk: 1, name: "ITEM", cls: "function", length: 2, arity: 2 },
   viewport: { tk: 1, name: "VIEWPORT", cls: "function", length: 2, arity: 2 },
+  slice: { tk: 1, name: "SLICE", cls: "function", length: 2, arity: 2 },
+  coverage: { tk: 1, name: "COVERAGE", cls: "function", length: 2, arity: 2 },
   crop: { tk: 1, name: "CROP", cls: "function", length: 2, arity: 2 },
   width: { tk: 1, name: "WIDTH", cls: "function", length: 2, arity: 2 },
+  height: { tk: 1, name: "HEIGHT", cls: "function", length: 2, arity: 2 },
 };
 
 export const lexicon = { ...base, ...additions };
