@@ -7,7 +7,11 @@ export default {
   },
   content: ["./src/**/*.{ts,tsx,html}", "./embed/**/*.{ts,tsx,html}"],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        roboto: ["Roboto", "sans-serif"],
+      },
+    },
   },
   plugins: [],
 };

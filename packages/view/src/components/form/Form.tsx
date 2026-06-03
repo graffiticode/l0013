@@ -14,7 +14,7 @@ type Status = "loading" | "loaded" | "error";
 // elapsed seconds; once loaded it reports the total time and links to the stored image.
 function StatusBanner({ status, elapsed, url }: { status: Status; elapsed: number; url?: string }) {
   return (
-    <div className="flex items-center gap-3 p-4 text-sm text-zinc-500">
+    <div className="flex items-center justify-center gap-3 border-b border-zinc-200 bg-zinc-50 p-4 text-center font-roboto text-base text-zinc-600">
       {status === "loading" && (
         <>
           <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
@@ -100,24 +100,26 @@ export const Form = ({ state }: FormProps) => {
 
   if (errors.length > 0) {
     return (
-      <div className="rounded-md font-mono flex flex-col gap-4 p-4 bg-white text-zinc-900">
+      <div className="rounded-md bg-white p-4 font-roboto text-zinc-900">
         {renderErrors(errors)}
       </div>
     );
   }
 
   return (
-    <div className="rounded-md font-mono flex flex-col gap-4 p-4 bg-white text-zinc-900">
+    <div className="overflow-hidden rounded-md bg-white text-zinc-900">
       <StatusBanner status={status} elapsed={elapsed} url={src} />
       {src && (
-        <img
-          key={src}
-          src={src}
-          alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"}
-          onLoad={() => setStatus("loaded")}
-          onError={() => setStatus("error")}
-          style={{ display: status === "loaded" ? "block" : "none" }}
-        />
+        <div className="flex justify-center p-4">
+          <img
+            key={src}
+            src={src}
+            alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"}
+            onLoad={() => setStatus("loaded")}
+            onError={() => setStatus("error")}
+            style={{ display: status === "loaded" ? "block" : "none" }}
+          />
+        </div>
       )}
     </div>
   );
