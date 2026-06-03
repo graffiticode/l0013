@@ -1,34 +1,56 @@
 // SPDX-License-Identifier: MIT
-// L0013's Form: renders the image produced by a `snap` program (the uploaded thumbnail), showing
-// a "Working…" animation until the image is ready (compile in flight + image loading), or compile
-// errors. Injected into the shared View (from @graffiticode/l0000-view), which supplies
-// `state.data` and `state.errors`.
+// L0013's Form: renders the image produced by a `snap` program (the uploaded thumbnail). A single
+// status banner shows a "Scraping… Ns" counter across the whole wait (compile in flight + image
+// download), then freezes to "Scraped in Ns" with a link to the stored PNG once the image loads.
+// Injected into the shared View (from @graffiticode/l0000-view), which supplies `state.data` and
+// `state.errors`.
 import "../../index.css";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { FormProps, CompileError } from "@graffiticode/l0000-view";
 
-function Working() {
-  return (
-    <div className="flex items-center gap-3 p-4 text-sm text-zinc-500">
-      <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
-      Working…
-    </div>
-  );
-}
+type Status = "loading" | "loaded" | "error";
 
-// Shown while the `snap` compile is in flight — i.e. while the server is rendering the target form
-// in headless Chrome and capturing it. The scrape can take a while (and we don't time it out), so
-// we show an elapsed-seconds counter to make clear it's still working rather than hung.
-function Scraping() {
-  const [secs, setSecs] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setSecs((s) => s + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
+// The status banner. While loading (the server scrapes, then the PNG downloads) it spins and counts
+// elapsed seconds; once loaded it reports the total time and links to the stored image.
+function StatusBanner({ status, elapsed, url }: { status: Status; elapsed: number; url?: string }) {
   return (
     <div className="flex items-center gap-3 p-4 text-sm text-zinc-500">
-      <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
-      Scraping… {secs}s
+      {status === "loading" && (
+        <>
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
+          Scraping… {elapsed}s
+        </>
+      )}
+      {status === "loaded" && (
+        <>
+          <span>Scraped in {elapsed}s</span>
+          {url && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 underline hover:text-blue-800"
+            >
+              View image
+            </a>
+          )}
+        </>
+      )}
+      {status === "error" && (
+        <>
+          <span>Couldn’t load image.</span>
+          {url && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 underline hover:text-blue-800"
+            >
+              Open link
+            </a>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -48,42 +70,54 @@ function renderErrors(errors: CompileError[]) {
   );
 }
 
-// Renders the thumbnail, showing the "Working…" animation until the image has loaded. `src` is
-// keyed so swapping to a new image resets the loading state.
-function ThumbnailImage({ src, alt }: { src: string; alt: string }) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
-  return (
-    <div className="relative">
-      {status === "loading" && <Working />}
-      {status === "error" && (
-        <div className="p-4 text-sm text-zinc-500">Couldn’t load image.</div>
-      )}
-      <img
-        key={src}
-        src={src}
-        alt={alt}
-        onLoad={() => setStatus("loaded")}
-        onError={() => setStatus("error")}
-        style={{ display: status === "loaded" ? "block" : "none" }}
-      />
-    </div>
-  );
-}
-
 export const Form = ({ state }: FormProps) => {
   const errors: CompileError[] = state.errors ?? [];
   const data: any = state.data;
   const src = typeof data?.url === "string" ? data.url : undefined;
 
+  const [status, setStatus] = useState<Status>("loading");
+  const [elapsed, setElapsed] = useState(0);
+
+  // Restart the banner only when one image URL is replaced by a different one (a re-snap). The
+  // initial undefined→URL transition must NOT reset — it would discard the scrape time counted so
+  // far while the compile was in flight.
+  const prevSrc = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (src && prevSrc.current && src !== prevSrc.current) {
+      setStatus("loading");
+      setElapsed(0);
+    }
+    prevSrc.current = src;
+  }, [src]);
+
+  // Tick the elapsed-seconds counter across the whole wait — compile in flight (no `src` yet) plus
+  // the image download — and freeze it once the image has loaded (or errored).
+  useEffect(() => {
+    if (status !== "loading") return;
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [status]);
+
+  if (errors.length > 0) {
+    return (
+      <div className="rounded-md font-mono flex flex-col gap-4 p-4 bg-white text-zinc-900">
+        {renderErrors(errors)}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-md font-mono flex flex-col gap-4 p-4 bg-white text-zinc-900">
-      {errors.length > 0 ? (
-        renderErrors(errors)
-      ) : typeof src === "string" ? (
-        <ThumbnailImage src={src} alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"} />
-      ) : (
-        // No image yet (compile still in flight = the server is scraping) → show the counter.
-        <Scraping />
+      <StatusBanner status={status} elapsed={elapsed} url={src} />
+      {src && (
+        <img
+          key={src}
+          src={src}
+          alt={data?.item ? `thumbnail ${data.item}` : "thumbnail"}
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+          style={{ display: status === "loaded" ? "block" : "none" }}
+        />
       )}
     </div>
   );
