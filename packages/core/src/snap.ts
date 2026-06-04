@@ -366,11 +366,13 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
   const { item, task, lang, viewport, slice, zoom, crop, width, height, token } = args;
   if (!item) throw new Error("snap: `item` is required");
   const itemId = item;
+  const t0 = Date.now();
   // The owner's access token: from the compile request (config.authToken), or a local-dev
   // fallback env var so the language server can be exercised standalone.
   const tok = token || process.env.GC_SNAP_ACCESS_TOKEN || "";
   // Use an explicit task override if given; otherwise resolve the task id from the item id.
   const resolved = task ? { taskId: task, lang } : await resolveItem(item, tok);
+  const tResolve = Date.now();
   const url = buildFormUrl({ taskId: resolved.taskId, lang: resolved.lang, token: tok });
 
   const vpW = Math.max(1, Math.round(Number(viewport?.width) || VIEWPORT_W));
@@ -384,6 +386,7 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   });
+  const tLaunch = Date.now();
   try {
     const page = await browser.newPage();
     // Bound the layout: the form lays out into this window before we capture.
@@ -398,9 +401,12 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
       if (err?.name !== "TimeoutError") throw err;
       console.warn(`snap: page did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
+    const tLoad = Date.now();
     const settled = await waitForRender(page, sharp, deadline);
     if (!settled) console.warn(`snap: content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
+    const tRender = Date.now();
+    let usedScale = DEVICE_SCALE;
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
     // `width` the height is derived from the aspect (and vice-versa); with neither, default width.
@@ -450,6 +456,7 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
           width: Math.max(1, Math.round(rect.width / DEVICE_SCALE)),
           height: Math.max(1, Math.round(rect.height / DEVICE_SCALE)),
         };
+        usedScale = renderScale;
         await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: renderScale });
         await new Promise((r) => setTimeout(r, RERENDER_MS));
         const hi = (await page.screenshot({ type: "png", clip })) as Buffer;
@@ -461,7 +468,14 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
       }
     }
 
+    const tCapture = Date.now();
     const publicUrl = await upload(itemId, png);
+    // Phase timing (telemetry): where the wall-clock goes, in ms.
+    console.log(
+      `snap.timing item=${itemId} resolve=${tResolve - t0} launch=${tLaunch - tResolve} ` +
+      `load=${tLoad - tLaunch} render=${tRender - tLoad} settled=${settled} ` +
+      `capture=${tCapture - tRender} scale=${usedScale} upload=${Date.now() - tCapture} total=${Date.now() - t0}`,
+    );
     // The object path is stable (`thumbnails/{item}.png` is overwritten each snap), so a fixed URL
     // would be served stale from browser/CDN/`<img>` caches even though the bytes changed. Append a
     // content-hash query param: the URL changes iff the image changes — busting caches on update,
