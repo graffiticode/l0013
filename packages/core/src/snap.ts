@@ -7,6 +7,10 @@
 // build-static) does not pull them in.
 import { createHash } from "node:crypto";
 
+// `window` only exists inside the Puppeteer callbacks below, which are serialized and run in the
+// browser. The core tsconfig has no DOM lib, so declare it as `any` to type-check this node file.
+declare const window: any;
+
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
 // The app's item form route (`/form/{itemId}`) resolves an item id to its task + language and
 // renders it — that's how `snap` gets the lang/task "from the item id" without a separate lookup.
@@ -270,6 +274,11 @@ function buildFormUrl({ taskId, lang, token }: { taskId: string; lang?: string; 
   params.set("id", String(taskId));
   if (lang) params.set("lang", String(lang));
   if (token) params.set("access_token", String(token));
+  // The view only posts its `onload` / `data-updated` readiness messages when given an `origin`
+  // (it uses it as the postMessage targetOrigin). We render top-level, so `window.parent` is the
+  // page itself — set origin to the page's own origin so the message is delivered to the listener
+  // snap injects, letting us wait for "rendered" instead of guessing with networkidle2.
+  params.set("origin", new URL(API_URL).origin);
   return `${API_URL}/form?${params.toString()}`;
 }
 
@@ -348,14 +357,32 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     const page = await browser.newPage();
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
-    // Bound the page load. `networkidle2` may never fire for a form that keeps polling, so cap the
-    // wait at NAV_TIMEOUT_MS and, on timeout, capture whatever has painted rather than failing — by
-    // then SETTLE_MS plus the elapsed wait have given the form ample time to render.
+    // Listen for the form's own "rendered" signal. The Graffiticode view posts
+    // `{ type: "data-updated", data }` to its parent whenever its data changes; as a top-level page
+    // that parent is this window. Install the listener before any page script runs and flip a flag
+    // on the first NON-EMPTY payload (the view also posts an initial empty `{}` on mount, which we
+    // ignore). This is the real readiness signal — far more reliable than networkidle2, which may
+    // never fire because the form holds a persistent Firestore connection.
+    await page.evaluateOnNewDocument(() => {
+      window.__snapReady = false;
+      window.addEventListener("message", (e: any) => {
+        const d: any = e?.data;
+        if (!d || d.type !== "data-updated") return;
+        const p = d.data;
+        const nonEmpty = p != null && (typeof p !== "object" || Object.keys(p).length > 0);
+        if (nonEmpty) window.__snapReady = true;
+      });
+    });
+    // Bounded load → wait for `data-updated`. On timeout (form never signalled), capture whatever
+    // painted rather than failing — by then NAV_TIMEOUT_MS + SETTLE_MS have given it ample time.
+    const deadline = Date.now() + NAV_TIMEOUT_MS;
     try {
-      await page.goto(url, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      const remaining = Math.max(1000, deadline - Date.now());
+      await page.waitForFunction(() => window.__snapReady === true, { timeout: remaining });
     } catch (err: any) {
       if (err?.name !== "TimeoutError") throw err;
-      console.warn(`snap: navigation to ${url} did not settle in ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+      console.warn(`snap: ${url} did not signal data-updated within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
