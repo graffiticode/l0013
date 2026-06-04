@@ -403,6 +403,17 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
   });
   try {
     const page = await browser.newPage();
+    // DIAGNOSTIC: the form is blank-white for ~30s then paints — capture WHY. Track console
+    // errors/warnings, failed requests, and any requests still in-flight when we give up (a hanging
+    // request that times out at ~30s is the prime suspect). Redact access_token from logged URLs.
+    const redact = (u: string) => u.replace(/access_token=[^&]+/i, "access_token=REDACTED").slice(0, 140);
+    const inflight = new Map<string, number>();
+    const failed: string[] = [];
+    const consoleMsgs: string[] = [];
+    page.on("request", (r: any) => inflight.set(r.url(), Date.now()));
+    page.on("requestfinished", (r: any) => inflight.delete(r.url()));
+    page.on("requestfailed", (r: any) => { failed.push(`${redact(r.url())} :: ${r.failure?.()?.errorText}`); inflight.delete(r.url()); });
+    page.on("console", (m: any) => { const t = m.type(); if (t === "error" || t === "warning") consoleMsgs.push(`${t}: ${m.text()}`.slice(0, 200)); });
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
     // Load the page, then wait for the content to actually paint and go stable (see waitForRender).
@@ -424,7 +435,12 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     } catch {}
     console.log(`snap.goto item=${itemId} status=${resp?.status?.() ?? "n/a"} lang=${resolved.lang ?? "?"} vp=${vpW}x${vpH} page=${dims ? `${dims.w}x${dims.h}` : "?"}`);
     const settled = await waitForRender(page, sharp, deadline, itemId);
-    if (!settled) console.warn(`snap: ${url} content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+    if (!settled) console.warn(`snap: content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+    // DIAGNOSTIC: what was the page doing during the wait?
+    const pending = [...inflight.entries()].sort((a, b) => a[1] - b[1]).map(([u, t]) => `${redact(u)}(${Date.now() - t}ms)`);
+    console.log(`snap.diag item=${itemId} settled=${settled} pending=${pending.length} | ${pending.slice(0, 6).join(" | ")}`);
+    if (failed.length) console.log(`snap.diag.failed item=${itemId} | ${failed.slice(0, 6).join(" | ")}`);
+    if (consoleMsgs.length) console.log(`snap.diag.console item=${itemId} | ${consoleMsgs.slice(0, 8).join(" || ")}`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
