@@ -7,6 +7,10 @@
 // build-static) does not pull them in.
 import { createHash } from "node:crypto";
 
+// Only referenced inside a Puppeteer page.evaluate callback (runs in the browser). The core tsconfig
+// has no DOM lib, so declare it as `any` to type-check this node file.
+declare const document: any;
+
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
 // The app's item form route (`/form/{itemId}`) resolves an item id to its task + language and
 // renders it — that's how `snap` gets the lang/task "from the item id" without a separate lookup.
@@ -345,7 +349,9 @@ async function waitForRender(page: any, sharp: any, deadline: number, itemId: st
   let lastLog = -1000;
   let settled = false;
   while (Date.now() < deadline) {
-    const buf = (await page.screenshot({ type: "png" })) as Buffer;
+    // Full-page (not viewport): the form may render its content below the fold, so a viewport-only
+    // probe can stay blank-white while the page has, in fact, painted. This matches the real capture.
+    const buf = (await page.screenshot({ type: "png", fullPage: true })) as Buffer;
     const { data } = await sharp(buf).resize({ width: RENDER_PROBE_W }).greyscale().raw().toBuffer({ resolveWithObject: true });
     const bg = data[0];
     let ink = 0;
@@ -410,8 +416,13 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
       if (err?.name !== "TimeoutError") throw err;
       console.warn(`snap: page did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
-    // DIAGNOSTIC: log the form-load status (token redacted) so we can see auth/error pages in prod.
-    console.log(`snap.goto item=${itemId} status=${resp?.status?.() ?? "n/a"} lang=${resolved.lang ?? "?"}`);
+    // DIAGNOSTIC: log the form-load status + page size so we can see auth/error pages and whether
+    // the content lays out below the viewport fold (vp ${vpW}x${vpH}).
+    let dims: any = null;
+    try {
+      dims = await page.evaluate(() => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight }));
+    } catch {}
+    console.log(`snap.goto item=${itemId} status=${resp?.status?.() ?? "n/a"} lang=${resolved.lang ?? "?"} vp=${vpW}x${vpH} page=${dims ? `${dims.w}x${dims.h}` : "?"}`);
     const settled = await waitForRender(page, sharp, deadline, itemId);
     if (!settled) console.warn(`snap: ${url} content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
