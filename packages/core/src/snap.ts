@@ -24,6 +24,12 @@ const VIEWPORT_H = 768;
 const DEVICE_SCALE = 2;
 const ASPECT = 4 / 3; // width : height — used only for the blank-page fallback
 const DEFAULT_OUTPUT_W = 1024; // crisp on retina; caller can override via `width`
+// When the inked crop is smaller than the requested output we'd have to UPSCALE it (→ blur). Instead
+// we re-render the form (a vector/DOM, not a fixed raster) at a higher device scale and re-capture
+// just the crop, so the pixels are real. MAX_DEVICE_SCALE caps that re-render scale; because we clip
+// the second capture to the crop, memory stays ~output-sized regardless of how far we zoom.
+const MAX_DEVICE_SCALE = 8;
+const RERENDER_MS = 250; // let the page repaint after a deviceScaleFactor change before re-capturing
 const SETTLE_MS = 1500; // let the form paint / post its first data-updated
 const NAV_TIMEOUT_MS = 30000; // bound page load: a form that never reaches networkidle2 (e.g. polls
 //                               forever) shouldn't hang the worker — capture what painted instead
@@ -411,11 +417,38 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
       const shot = (await page.screenshot({ type: "png", clip })) as Buffer;
       png = await sharp(shot).resize(resizeOpts).png().toBuffer();
     } else {
-      // Content-aware: capture the whole form, then trim to the inked content (default) or take
-      // the densest fixed-aspect region (`slice`). The resize fits the crop into the output box.
+      // Content-aware. Pass 1 (measure): capture the whole form at the base scale, then decide the
+      // crop — trim to the inked content (default) or the densest fixed-aspect region (`slice`).
       const shot = (await page.screenshot({ type: "png", fullPage: true })) as Buffer;
       const rect = await contentRect(sharp, shot, slice, zoom);
-      png = await sharp(shot).extract(rect).resize(resizeOpts).png().toBuffer();
+
+      // How much would the final resize have to *enlarge* this crop to fill the output box? `rect`
+      // is in device px at DEVICE_SCALE; k > 1 means we'd be upscaling (blur).
+      const kW = reqW != null ? reqW / rect.width : 0;
+      const kH = reqH != null ? reqH / rect.height : 0;
+      const k = Math.max(kW, kH) || DEFAULT_OUTPUT_W / rect.width; // neither given → default width
+      const renderScale = Math.min(MAX_DEVICE_SCALE, DEVICE_SCALE * Math.max(1, k));
+
+      if (renderScale > DEVICE_SCALE + 1e-6) {
+        // Pass 2 (enlarge + re-capture): re-render the vector at a higher device scale and grab just
+        // this crop. deviceScaleFactor doesn't reflow the layout (CSS px are unchanged), so the crop
+        // maps to the same CSS rect by the scale ratio — no re-detection needed. The pass-1 image is
+        // CSS px × DEVICE_SCALE, so divide by DEVICE_SCALE to get the CSS-space clip.
+        const clip = {
+          x: Math.round(rect.left / DEVICE_SCALE),
+          y: Math.round(rect.top / DEVICE_SCALE),
+          width: Math.max(1, Math.round(rect.width / DEVICE_SCALE)),
+          height: Math.max(1, Math.round(rect.height / DEVICE_SCALE)),
+        };
+        await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: renderScale });
+        await new Promise((r) => setTimeout(r, RERENDER_MS));
+        const hi = (await page.screenshot({ type: "png", clip })) as Buffer;
+        // The clip is now ~output-sized in real pixels, so resize only ever DOWNscales → crisp.
+        png = await sharp(hi).resize(resizeOpts).png().toBuffer();
+      } else {
+        // Crop already ≥ output: a plain extract + downscale, as before (no upscaling involved).
+        png = await sharp(shot).extract(rect).resize(resizeOpts).png().toBuffer();
+      }
     }
 
     const publicUrl = await upload(itemId, png);
