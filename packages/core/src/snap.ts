@@ -7,10 +7,6 @@
 // build-static) does not pull them in.
 import { createHash } from "node:crypto";
 
-// `window` only exists inside the Puppeteer callbacks below, which are serialized and run in the
-// browser. The core tsconfig has no DOM lib, so declare it as `any` to type-check this node file.
-declare const window: any;
-
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
 // The app's item form route (`/form/{itemId}`) resolves an item id to its task + language and
 // renders it — that's how `snap` gets the lang/task "from the item id" without a separate lookup.
@@ -30,9 +26,14 @@ const DEFAULT_OUTPUT_W = 1024; // crisp on retina; caller can override via `widt
 // the second capture to the crop, memory stays ~output-sized regardless of how far we zoom.
 const MAX_DEVICE_SCALE = 8;
 const RERENDER_MS = 250; // let the page repaint after a deviceScaleFactor change before re-capturing
-const SETTLE_MS = 1500; // let the form paint / post its first data-updated
-const NAV_TIMEOUT_MS = 30000; // bound page load: a form that never reaches networkidle2 (e.g. polls
-//                               forever) shouldn't hang the worker — capture what painted instead
+const NAV_TIMEOUT_MS = 30000; // overall bound on waiting for the form to render before capturing
+// Readiness = the pixels appearing and going still. The form posts no catchable signal and its
+// network goes idle ~1.5s *before* the content paints, so we poll a tiny greyscale of the viewport
+// and resolve once two consecutive frames are identical and non-blank — the one signal that is
+// always true when the form has actually rendered, independent of network or postMessage.
+const RENDER_PROBE_W = 48; // width of the downscaled frame we hash to detect "painted & stable"
+const RENDER_PROBE_MS = 250; // gap between readiness samples
+const SETTLE_MS = 250; // small extra paint buffer after content goes stable, before the real capture
 const INK_THRESHOLD = 12; // greyscale distance from the background to count a pixel as "ink"
 const INK_MARGIN = 8 * DEVICE_SCALE; // padding (capture px) around the trimmed content box
 // Lower bound on the zoom-1 size search, as a fraction of the zoom-0 frame's linear size — purely
@@ -280,11 +281,6 @@ function buildFormUrl({ taskId, lang, token }: { taskId: string; lang?: string; 
   params.set("id", String(taskId));
   if (lang) params.set("lang", String(lang));
   if (token) params.set("access_token", String(token));
-  // The view only posts its `onload` / `data-updated` readiness messages when given an `origin`
-  // (it uses it as the postMessage targetOrigin). We render top-level, so `window.parent` is the
-  // page itself — set origin to the page's own origin so the message is delivered to the listener
-  // snap injects, letting us wait for "rendered" instead of guessing with networkidle2.
-  params.set("origin", new URL(API_URL).origin);
   return `${API_URL}/form?${params.toString()}`;
 }
 
@@ -337,6 +333,27 @@ async function upload(itemId: string, buffer: Buffer): Promise<string> {
   return `https://storage.googleapis.com/${STORAGE_BUCKET}/${objectPath}`;
 }
 
+// Wait until the form has painted stable content. We sample a tiny greyscale of the viewport and
+// resolve once two consecutive frames are byte-identical AND non-blank — the form posts no signal
+// we can catch, and its network idles well before the content paints, so the pixels themselves are
+// the only reliable "rendered" cue. Returns true if it settled, false if it hit the deadline (in
+// which case we capture whatever is there rather than failing).
+async function waitForRender(page: any, sharp: any, deadline: number): Promise<boolean> {
+  let prev: string | null = null;
+  while (Date.now() < deadline) {
+    const buf = (await page.screenshot({ type: "png" })) as Buffer;
+    const { data } = await sharp(buf).resize({ width: RENDER_PROBE_W }).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const bg = data[0];
+    let ink = 0;
+    for (let i = 0; i < data.length; i++) if (Math.abs(data[i] - bg) > INK_THRESHOLD) ink++;
+    const sig = createHash("sha1").update(data).digest("hex");
+    if (ink > 0 && sig === prev) return true;
+    prev = sig;
+    await new Promise((r) => setTimeout(r, RENDER_PROBE_MS));
+  }
+  return false;
+}
+
 export async function snap(args: SnapArgs): Promise<SnapResult> {
   const { item, task, lang, viewport, slice, zoom, crop, width, height, token } = args;
   if (!item) throw new Error("snap: `item` is required");
@@ -363,33 +380,18 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     const page = await browser.newPage();
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
-    // Listen for the form's own "rendered" signal. The Graffiticode view posts
-    // `{ type: "data-updated", data }` to its parent whenever its data changes; as a top-level page
-    // that parent is this window. Install the listener before any page script runs and flip a flag
-    // on the first NON-EMPTY payload (the view also posts an initial empty `{}` on mount, which we
-    // ignore). This is the real readiness signal — far more reliable than networkidle2, which may
-    // never fire because the form holds a persistent Firestore connection.
-    await page.evaluateOnNewDocument(() => {
-      window.__snapReady = false;
-      window.addEventListener("message", (e: any) => {
-        const d: any = e?.data;
-        if (!d || d.type !== "data-updated") return;
-        const p = d.data;
-        const nonEmpty = p != null && (typeof p !== "object" || Object.keys(p).length > 0);
-        if (nonEmpty) window.__snapReady = true;
-      });
-    });
-    // Bounded load → wait for `data-updated`. On timeout (form never signalled), capture whatever
-    // painted rather than failing — by then NAV_TIMEOUT_MS + SETTLE_MS have given it ample time.
+    // Load the page, then wait for the content to actually paint and go stable (see waitForRender).
+    // domcontentloaded is just "the document exists"; the real wait is the pixel-stability poll,
+    // bounded by NAV_TIMEOUT_MS. On timeout we capture whatever is there rather than failing.
     const deadline = Date.now() + NAV_TIMEOUT_MS;
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-      const remaining = Math.max(1000, deadline - Date.now());
-      await page.waitForFunction(() => window.__snapReady === true, { timeout: remaining });
     } catch (err: any) {
       if (err?.name !== "TimeoutError") throw err;
-      console.warn(`snap: ${url} did not signal data-updated within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+      console.warn(`snap: ${url} did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
+    const settled = await waitForRender(page, sharp, deadline);
+    if (!settled) console.warn(`snap: ${url} content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
