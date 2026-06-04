@@ -7,10 +7,6 @@
 // build-static) does not pull them in.
 import { createHash } from "node:crypto";
 
-// Only referenced inside a Puppeteer page.evaluate callback (runs in the browser). The core tsconfig
-// has no DOM lib, so declare it as `any` to type-check this node file.
-declare const document: any;
-
 const API_URL = process.env.GRAFFITICODE_API_URL || "https://api.graffiticode.org";
 // The app's item form route (`/form/{itemId}`) resolves an item id to its task + language and
 // renders it — that's how `snap` gets the lang/task "from the item id" without a separate lookup.
@@ -31,11 +27,13 @@ const DEFAULT_OUTPUT_W = 1024; // crisp on retina; caller can override via `widt
 const MAX_DEVICE_SCALE = 8;
 const RERENDER_MS = 250; // let the page repaint after a deviceScaleFactor change before re-capturing
 const NAV_TIMEOUT_MS = 30000; // overall bound on waiting for the form to render before capturing
-// Readiness = the pixels appearing and going still. The form posts no catchable signal and its
-// network goes idle ~1.5s *before* the content paints, so we poll a tiny greyscale of the viewport
-// and resolve once two consecutive frames are identical and non-blank — the one signal that is
-// always true when the form has actually rendered, independent of network or postMessage.
-const RENDER_PROBE_W = 48; // width of the downscaled frame we hash to detect "painted & stable"
+// Readiness = the pixels appearing and going still. The form posts no catchable signal, so we poll a
+// downscaled greyscale of the full page and resolve once two consecutive frames are identical and
+// carry enough ink to be real content. RENDER_PROBE_W must be high enough that *small* content
+// (e.g. a lone "3" in a corner) still registers — at 48px it downsampled to ~0 ink and never
+// tripped, so the wait burned the full timeout even though the page had painted in ~3s.
+const RENDER_PROBE_W = 512; // width of the downscaled frame we compare to detect "painted & stable"
+const RENDER_MIN_INK = 4; // min inked pixels (at RENDER_PROBE_W) to count a frame as real content
 const RENDER_PROBE_MS = 250; // gap between readiness samples
 const SETTLE_MS = 250; // small extra paint buffer after content goes stable, before the real capture
 const INK_THRESHOLD = 12; // greyscale distance from the background to count a pixel as "ink"
@@ -342,12 +340,8 @@ async function upload(itemId: string, buffer: Buffer): Promise<string> {
 // we can catch, and its network idles well before the content paints, so the pixels themselves are
 // the only reliable "rendered" cue. Returns true if it settled, false if it hit the deadline (in
 // which case we capture whatever is there rather than failing).
-async function waitForRender(page: any, sharp: any, deadline: number, itemId: string): Promise<boolean> {
+async function waitForRender(page: any, sharp: any, deadline: number): Promise<boolean> {
   let prev: Buffer | null = null;
-  const start = Date.now();
-  const trace: string[] = [];
-  let lastLog = -1000;
-  let settled = false;
   while (Date.now() < deadline) {
     // Full-page (not viewport): the form may render its content below the fold, so a viewport-only
     // probe can stay blank-white while the page has, in fact, painted. This matches the real capture.
@@ -360,23 +354,12 @@ async function waitForRender(page: any, sharp: any, deadline: number, itemId: st
       if (Math.abs(data[i] - bg) > INK_THRESHOLD) ink++;
       if (prev && Math.abs(data[i] - prev[i]) > INK_THRESHOLD) changed++;
     }
-    const t = Date.now() - start;
-    // DIAGNOSTIC: sample the trace ~once/sec so we can see, in prod logs, when content appears and
-    // whether/how it stabilizes. (Temporary — drives the readiness-tolerance decision.)
-    if (t - lastLog >= 1000) {
-      trace.push(`${t}ms:ink${ink}/${data.length},chg${changed}`);
-      lastLog = t;
-    }
-    if (ink > 0 && prev && changed === 0) {
-      settled = true;
-      trace.push(`${t}ms:STABLE`);
-      break;
-    }
+    // Settled = enough ink to be real content, and unchanged since the previous frame.
+    if (ink >= RENDER_MIN_INK && prev && changed === 0) return true;
     prev = Buffer.from(data);
     await new Promise((r) => setTimeout(r, RENDER_PROBE_MS));
   }
-  console.log(`snap.waitForRender item=${itemId} settled=${settled} elapsedMs=${Date.now() - start} trace=[${trace.join(" ")}]`);
-  return settled;
+  return false;
 }
 
 export async function snap(args: SnapArgs): Promise<SnapResult> {
@@ -403,44 +386,20 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
   });
   try {
     const page = await browser.newPage();
-    // DIAGNOSTIC: the form is blank-white for ~30s then paints — capture WHY. Track console
-    // errors/warnings, failed requests, and any requests still in-flight when we give up (a hanging
-    // request that times out at ~30s is the prime suspect). Redact access_token from logged URLs.
-    const redact = (u: string) => u.replace(/access_token=[^&]+/i, "access_token=REDACTED").slice(0, 140);
-    const inflight = new Map<string, number>();
-    const failed: string[] = [];
-    const consoleMsgs: string[] = [];
-    page.on("request", (r: any) => inflight.set(r.url(), Date.now()));
-    page.on("requestfinished", (r: any) => inflight.delete(r.url()));
-    page.on("requestfailed", (r: any) => { failed.push(`${redact(r.url())} :: ${r.failure?.()?.errorText}`); inflight.delete(r.url()); });
-    page.on("console", (m: any) => { const t = m.type(); if (t === "error" || t === "warning") consoleMsgs.push(`${t}: ${m.text()}`.slice(0, 200)); });
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
     // Load the page, then wait for the content to actually paint and go stable (see waitForRender).
     // domcontentloaded is just "the document exists"; the real wait is the pixel-stability poll,
     // bounded by NAV_TIMEOUT_MS. On timeout we capture whatever is there rather than failing.
     const deadline = Date.now() + NAV_TIMEOUT_MS;
-    let resp: any = null;
     try {
-      resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     } catch (err: any) {
       if (err?.name !== "TimeoutError") throw err;
       console.warn(`snap: page did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
-    // DIAGNOSTIC: log the form-load status + page size so we can see auth/error pages and whether
-    // the content lays out below the viewport fold (vp ${vpW}x${vpH}).
-    let dims: any = null;
-    try {
-      dims = await page.evaluate(() => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight }));
-    } catch {}
-    console.log(`snap.goto item=${itemId} status=${resp?.status?.() ?? "n/a"} lang=${resolved.lang ?? "?"} vp=${vpW}x${vpH} page=${dims ? `${dims.w}x${dims.h}` : "?"}`);
-    const settled = await waitForRender(page, sharp, deadline, itemId);
+    const settled = await waitForRender(page, sharp, deadline);
     if (!settled) console.warn(`snap: content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
-    // DIAGNOSTIC: what was the page doing during the wait?
-    const pending = [...inflight.entries()].sort((a, b) => a[1] - b[1]).map(([u, t]) => `${redact(u)}(${Date.now() - t}ms)`);
-    console.log(`snap.diag item=${itemId} settled=${settled} pending=${pending.length} | ${pending.slice(0, 6).join(" | ")}`);
-    if (failed.length) console.log(`snap.diag.failed item=${itemId} | ${failed.slice(0, 6).join(" | ")}`);
-    if (consoleMsgs.length) console.log(`snap.diag.console item=${itemId} | ${consoleMsgs.slice(0, 8).join(" || ")}`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
