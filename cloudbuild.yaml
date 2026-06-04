@@ -35,6 +35,9 @@ steps:
       - '--cpu=2'
       - '--concurrency=4'
       - '--timeout=300'
+      # Keep one instance warm: a cold start pays ~6-7s of headless-Chrome launch on top of the
+      # render, so the first snap after idle was ~15-20s. min-instances=1 removes that first-hit.
+      - '--min-instances=1'
     id: Deploy
     entrypoint: gcloud
 
