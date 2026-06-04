@@ -21,6 +21,8 @@ const DEVICE_SCALE = 2;
 const ASPECT = 4 / 3; // width : height — used only for the blank-page fallback
 const DEFAULT_OUTPUT_W = 1024; // crisp on retina; caller can override via `width`
 const SETTLE_MS = 1500; // let the form paint / post its first data-updated
+const NAV_TIMEOUT_MS = 30000; // bound page load: a form that never reaches networkidle2 (e.g. polls
+//                               forever) shouldn't hang the worker — capture what painted instead
 const INK_THRESHOLD = 12; // greyscale distance from the background to count a pixel as "ink"
 const INK_MARGIN = 8 * DEVICE_SCALE; // padding (capture px) around the trimmed content box
 // Lower bound on the zoom-1 size search, as a fraction of the zoom-0 frame's linear size — purely
@@ -205,7 +207,10 @@ async function contentRect(
   // the best density score. Size — not position — is what zoom interpolates.
   let bestScore = -1, denseWh = base.wh;
   const minWh = Math.max(2, Math.round(base.wh * ZOOM_SEARCH_MIN));
-  for (let wh = base.wh; wh >= minWh; wh = Math.round(wh * ZOOM_SEARCH_STEP)) {
+  // `Math.min(wh - 1, …)` forces a strict decrease: `Math.round(wh * 0.9)` has fixed points at
+  // wh ∈ {2,3,4,5} (round-half-up), so a bare geometric step stalls — and hangs — once the frame is
+  // small (low-ink forms). The geometric ~10% step still applies for larger wh.
+  for (let wh = base.wh; wh >= minWh; wh = Math.min(wh - 1, Math.round(wh * ZOOM_SEARCH_STEP))) {
     const r = maxInkWindow(
       Math.round(wh * aspect), wh,
       base.x, base.y, base.x + base.ww, base.y + base.wh,
@@ -343,10 +348,15 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     const page = await browser.newPage();
     // Bound the layout: the form lays out into this window before we capture.
     await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: DEVICE_SCALE });
-    // Don't time out the page load — some forms take a while to settle, and a slow scrape should
-    // wait, not fail. `timeout: 0` disables Puppeteer's nav timeout; Cloud Run's request timeout
-    // (300s) is the real backstop, so this can't hang a worker indefinitely.
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 0 });
+    // Bound the page load. `networkidle2` may never fire for a form that keeps polling, so cap the
+    // wait at NAV_TIMEOUT_MS and, on timeout, capture whatever has painted rather than failing — by
+    // then SETTLE_MS plus the elapsed wait have given the form ample time to render.
+    try {
+      await page.goto(url, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
+    } catch (err: any) {
+      if (err?.name !== "TimeoutError") throw err;
+      console.warn(`snap: navigation to ${url} did not settle in ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+    }
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
     // Output sizing: fit the crop within a (maxW × maxH) box, preserving its aspect. With only
