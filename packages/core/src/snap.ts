@@ -338,20 +338,39 @@ async function upload(itemId: string, buffer: Buffer): Promise<string> {
 // we can catch, and its network idles well before the content paints, so the pixels themselves are
 // the only reliable "rendered" cue. Returns true if it settled, false if it hit the deadline (in
 // which case we capture whatever is there rather than failing).
-async function waitForRender(page: any, sharp: any, deadline: number): Promise<boolean> {
-  let prev: string | null = null;
+async function waitForRender(page: any, sharp: any, deadline: number, itemId: string): Promise<boolean> {
+  let prev: Buffer | null = null;
+  const start = Date.now();
+  const trace: string[] = [];
+  let lastLog = -1000;
+  let settled = false;
   while (Date.now() < deadline) {
     const buf = (await page.screenshot({ type: "png" })) as Buffer;
     const { data } = await sharp(buf).resize({ width: RENDER_PROBE_W }).greyscale().raw().toBuffer({ resolveWithObject: true });
     const bg = data[0];
     let ink = 0;
-    for (let i = 0; i < data.length; i++) if (Math.abs(data[i] - bg) > INK_THRESHOLD) ink++;
-    const sig = createHash("sha1").update(data).digest("hex");
-    if (ink > 0 && sig === prev) return true;
-    prev = sig;
+    let changed = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (Math.abs(data[i] - bg) > INK_THRESHOLD) ink++;
+      if (prev && Math.abs(data[i] - prev[i]) > INK_THRESHOLD) changed++;
+    }
+    const t = Date.now() - start;
+    // DIAGNOSTIC: sample the trace ~once/sec so we can see, in prod logs, when content appears and
+    // whether/how it stabilizes. (Temporary — drives the readiness-tolerance decision.)
+    if (t - lastLog >= 1000) {
+      trace.push(`${t}ms:ink${ink}/${data.length},chg${changed}`);
+      lastLog = t;
+    }
+    if (ink > 0 && prev && changed === 0) {
+      settled = true;
+      trace.push(`${t}ms:STABLE`);
+      break;
+    }
+    prev = Buffer.from(data);
     await new Promise((r) => setTimeout(r, RENDER_PROBE_MS));
   }
-  return false;
+  console.log(`snap.waitForRender item=${itemId} settled=${settled} elapsedMs=${Date.now() - start} trace=[${trace.join(" ")}]`);
+  return settled;
 }
 
 export async function snap(args: SnapArgs): Promise<SnapResult> {
@@ -384,13 +403,16 @@ export async function snap(args: SnapArgs): Promise<SnapResult> {
     // domcontentloaded is just "the document exists"; the real wait is the pixel-stability poll,
     // bounded by NAV_TIMEOUT_MS. On timeout we capture whatever is there rather than failing.
     const deadline = Date.now() + NAV_TIMEOUT_MS;
+    let resp: any = null;
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     } catch (err: any) {
       if (err?.name !== "TimeoutError") throw err;
-      console.warn(`snap: ${url} did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
+      console.warn(`snap: page did not load within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     }
-    const settled = await waitForRender(page, sharp, deadline);
+    // DIAGNOSTIC: log the form-load status (token redacted) so we can see auth/error pages in prod.
+    console.log(`snap.goto item=${itemId} status=${resp?.status?.() ?? "n/a"} lang=${resolved.lang ?? "?"}`);
+    const settled = await waitForRender(page, sharp, deadline, itemId);
     if (!settled) console.warn(`snap: ${url} content did not stabilize within ${NAV_TIMEOUT_MS}ms; capturing anyway`);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
 
