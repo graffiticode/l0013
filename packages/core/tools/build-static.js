@@ -1,6 +1,7 @@
 // Emits L0013's public static assets into dist/static/. As a child of L0000, L0013 merges
 // inherited content from its parent:
-//   - lexicon.js: the merged lexicon (base + L0013) — already merged in src/lexicon.ts.
+//   - lexicon.json: the merged lexicon (base + L0013) — already merged in src/lexicon.ts.
+//     (the legacy lexicon.js request path is aliased to it by the API server.)
 //   - instructions.md: parent (L0000) instructions concatenated with L0013's.
 // The rest (spec.html, language-info.json, scope.json, schema.json, template.gc,
 // usage-guide.md) are L0013's own.
@@ -11,6 +12,7 @@ import {
   copyFileSync,
   readFileSync,
   existsSync,
+  rmSync,
 } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -26,11 +28,14 @@ const outDir = join(pkgDir, "dist", "static");
 
 mkdirSync(outDir, { recursive: true });
 
-// 1. lexicon.js — merged (base + L0013), without trailing semicolon (console parses it).
+// 1. lexicon — merged (base + L0013) as plain JSON in lexicon.json. No lexicon.js is written:
+//    the API server aliases the legacy lexicon.js request path to this file (see app.ts).
 writeFileSync(
-  join(outDir, "lexicon.js"),
-  `export const lexicon = ${JSON.stringify(lexicon, null, 2)}\n`,
+  join(outDir, "lexicon.json"),
+  `${JSON.stringify(lexicon, null, 2)}\n`,
 );
+// Remove any stale lexicon.js left by an earlier build — the asset is JSON-only now.
+rmSync(join(outDir, "lexicon.js"), { force: true });
 
 // 2. spec.html via spec-md.
 const specHtml = await Promise.resolve(specMarkdown.html(join(specDir, "spec.md")));

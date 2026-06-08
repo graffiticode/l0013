@@ -38,7 +38,7 @@ L0013 is a Graffiticode dialect — a child of `@graffiticode/l0000`. **Its purp
   - `src/lexicon.ts`: merges L0000's base lexicon with L0013's additions
   - `src/compiler.ts`: `Checker` and `Transformer` extending L0000's; the `SNAP` handler invokes `snap()` async, the modifier handlers normalize L0000 `Record` wrappers into a plain options object
   - `src/snap.ts`: **the side-effecting core** — render → content-aware crop → resize → upload. Node-only deps (puppeteer / sharp / firebase-admin) are imported **lazily** so that merely importing the compiler (e.g. `build-static`) doesn't pull them in
-  - `tools/build-static.js`: generates `dist/static/` (merged `lexicon.js`, `spec.html` from spec-md, merged `instructions.md`, plus `usage-guide.md` / `scope.json` / `schema.json` / `template.gc`) for the API to serve
+  - `tools/build-static.js`: generates `dist/static/` (merged `lexicon.json` — the legacy `lexicon.js` request path is aliased to it by the API server, `spec.html` from spec-md, merged `instructions.md`, plus `usage-guide.md` / `scope.json` / `schema.json` / `template.gc`) for the API to serve
 
 - **`packages/api/`** — `@graffiticode/api-l0013`: Express language server. TypeScript, `tsx` in dev, compiled to `dist/` for prod.
   - Routes (`src/routes/`): `root.ts` (`GET /` health check), `compile.ts` (`POST /compile` + `OPTIONS` for CORS — forwards to core `compile()` with `lang="0013"`), `auth.ts` (token validation middleware → `req.auth`), `utils.ts` (auth parsing, CORS, handler builder), `index.ts` (re-exports)
