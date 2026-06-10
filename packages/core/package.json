@@ -1,5 +1,7 @@
 {
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "name": "@graffiticode/l0013",
   "version": "0.1.0",
   "description": "L0013 — a Graffiticode dialect that renders a task's form view to an image (`snap`), inheriting @graffiticode/l0000",
