@@ -1,5 +1,7 @@
 {
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "name": "@graffiticode/l0013-view",
   "version": "0.1.0",
   "description": "L0013 view — the language-specific Form (hello/image/theme), rendered through the shared View inherited from @graffiticode/l0000-view",
@@ -29,7 +31,7 @@
     "react-dom": "^17.0.0 || ^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@graffiticode/l0000-view": "^0.1.0"
+    "@graffiticode/l0000-view": "^0.1.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.11",
